@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: project-cm-chatbot
+    env: python
+    rootDir: .github/chatbot
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: META_VERIFY_TOKEN
+        sync: false
+      - key: META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: META_INSTAGRAM_ACCOUNT_ID
+        sync: false
+      - key: META_GRAPH_API_VERSION
+        value: v21.0

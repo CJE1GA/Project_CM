@@ -66,3 +66,19 @@ python test_flows.py
 
 Números de WhatsApp, rutas de imágenes y programas se editan en [config.py](config.py).
 Las imágenes van en [static/images](static/images).
+
+## Despliegue público en Render
+
+Este proyecto incluye [../../render.yaml](../../render.yaml) para desplegarlo como web service público con HTTPS en Render.
+
+Variables de entorno importantes en producción:
+
+```powershell
+FLASK_SECRET_KEY=valor_secreto_largo
+META_VERIFY_TOKEN=tu_verify_token
+META_PAGE_ACCESS_TOKEN=tu_page_access_token
+META_INSTAGRAM_ACCOUNT_ID=tu_instagram_business_account_id
+META_GRAPH_API_VERSION=v21.0
+```
+
+En Render el servicio se levanta con `gunicorn --bind 0.0.0.0:$PORT app:app`, por lo que no necesitas usar `FLASK_USE_HTTPS` en producción.
