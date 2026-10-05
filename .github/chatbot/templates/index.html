@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FULL · Chatbot</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="phone">
+    <header>
+      <div class="avatar">F</div>
+      <div>
+        <strong>FULL</strong>
+        <span>Comunidad Fitness · Instagram</span>
+      </div>
+      <button id="reset" title="Reiniciar conversación">↻</button>
+    </header>
+
+    <div class="sim">
+      <input id="username" type="text" maxlength="80" placeholder="@usuario_instagram">
+    </div>
+
+    <main id="chat"></main>
+
+    <div id="quick" class="quick"></div>
+
+    <div class="sim">
+      <button data-type="reel">Simular reel</button>
+      <button data-type="story_mention">Simular etiqueta en historia</button>
+      <button data-type="comment">Simular comentario</button>
+    </div>
+
+    <form id="form" autocomplete="off">
+      <input id="input" type="text" maxlength="500" placeholder="Escribe un mensaje...">
+      <button type="submit">Enviar</button>
+    </form>
+  </div>
+
+<script>
+const chat = document.getElementById('chat');
+const quick = document.getElementById('quick');
+const form = document.getElementById('form');
+const input = document.getElementById('input');
+const username = document.getElementById('username');
+
+function bubble(who) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + who;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+  return el;
+}
+
+function renderBot(msg) {
+  const el = bubble('bot');
+  if (msg.type === 'text') {
+    el.textContent = msg.content;
+  } else if (msg.type === 'image') {
+    const img = document.createElement('img');
+    img.src = msg.url;
+    img.alt = msg.caption;
+    img.onerror = () => {
+      const ph = document.createElement('div');
+      ph.className = 'placeholder';
+      ph.textContent = '🖼️ ' + msg.caption + ' (imagen pendiente: ' + msg.url + ')';
+      el.replaceChildren(ph);
+    };
+    el.appendChild(img);
+  } else if (msg.type === 'link') {
+    const a = document.createElement('a');
+    a.href = msg.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = '💬 ' + msg.label;
+    el.appendChild(a);
+  }
+}
+
+function renderQuick(options) {
+  quick.replaceChildren();
+  (options || []).forEach(text => {
+    if (text === 'Quiero inscribirme') return;
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.onclick = () => send(text);
+    quick.appendChild(b);
+  });
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  return res.json();
+}
+
+function renderReply(data) {
+  (data.messages || []).forEach(renderBot);
+  if (data.quick_replies) renderQuick(data.quick_replies);
+}
+
+function note(text) {
+  const el = document.createElement('div');
+  el.className = 'note';
+  el.textContent = text;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function send(text) {
+  if (!text.trim()) return;
+  bubble('user').textContent = text;
+  input.value = '';
+  renderQuick([]);
+  renderReply(await post('/api/message', {
+    message: text,
+    instagram_username: username.value
+  }));
+}
+
+async function simulate(type) {
+  note('Evento recibido: ' + type);
+  const data = await post('/api/message', { message: 'https://instagram.com/reel/abc', type: type });
+  if (data.ignored) note('Ignorado por el chatbot');
+  else renderReply(data);
+}
+
+document.querySelectorAll('.sim button').forEach(b => {
+  b.onclick = () => simulate(b.dataset.type);
+});
+
+form.onsubmit = e => { e.preventDefault(); send(input.value); };
+document.getElementById('reset').onclick = start;
+
+async function start() {
+  chat.replaceChildren();
+  await post('/api/start', { instagram_username: username.value });
+  renderQuick([]);
+  note('El chatbot responderá cuando el usuario escriba un mensaje.');
+}
+
+username.onchange = start;
+
+start();
+</script>
+</body>
+</html>

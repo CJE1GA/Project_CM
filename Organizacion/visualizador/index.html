@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Content Grid | Instagram planner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-mark">CM</div>
+      <div class="sidebar-copy">
+        <p class="eyebrow">Content studio</p>
+        <h1>Instagram<br><em>planner</em></h1>
+        <p class="sidebar-note">Una vista editorial para convertir reels y diseños de Organizacion_2M en un feed que se entiende de un vistazo.</p>
+      </div>
+      <div class="source-card">
+        <span class="source-dot"></span>
+        <div>
+          <strong>Organizacion_2M</strong>
+          <small>14 sep - 13 oct 2026</small>
+        </div>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Instagram / planificación</p>
+          <h2>Así se vería el perfil</h2>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-chip"><span></span> Regla A activa</span>
+          <button class="icon-button" id="todayButton" title="Volver al inicio del periodo" aria-label="Volver al inicio del periodo">↺</button>
+        </div>
+      </header>
+
+      <section class="metrics" aria-label="Resumen del plan">
+        <div class="metric metric-main"><span>Total planificado</span><strong>14</strong><small>reels y diseños</small></div>
+        <div class="metric"><span>Reels</span><strong>10</strong><small>formato principal</small></div>
+        <div class="metric"><span>Diseños</span><strong>4</strong><small>piezas gráficas</small></div>
+      </section>
+
+      <section class="feed-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Vista de perfil</p>
+            <h3>Las tres columnas del feed</h3>
+          </div>
+          <div class="feed-legend"><span class="legend-dot training"></span> Full Training <span class="legend-dot wellness"></span> Wellness <span class="legend-dot running"></span> Running Club</div>
+        </div>
+        <div class="feed-grid" id="feedGrid"></div>
+      </section>
+
+      <section class="calendar-section" id="calendarSection">
+        <div class="section-heading calendar-heading">
+          <div>
+            <p class="eyebrow">Calendario editorial</p>
+            <h3>14 septiembre — 13 octubre 2026</h3>
+          </div>
+          <div class="calendar-controls">
+            <button class="filter-button active" data-filter="all">Todo</button>
+            <button class="filter-button" data-filter="reel">Reels</button>
+            <button class="filter-button" data-filter="design">Diseños</button>
+          </div>
+        </div>
+        <div class="rule-banner"><span class="rule-icon">A</span><span><strong>Frecuencia protegida:</strong> el reel de Preparación Hyrox (A) aparece como máximo una vez por semana.</span></div>
+        <div class="calendar" id="calendar" aria-live="polite"></div>
+      </section>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
