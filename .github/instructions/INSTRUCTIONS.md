@@ -144,7 +144,8 @@ User examples:
 Flow:
 
 1. Ask which branch the user prefers.
-2. Send the corresponding WhatsApp link.
+2. Ask the user for their phone number if it is not already registered.
+3. Send the corresponding WhatsApp link.
 
 Guadalupe:
 

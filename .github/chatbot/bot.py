@@ -295,6 +295,36 @@ def _ask_branch(state, topic):
     }
 
 
+def _ask_trial_phone(state, branch_key):
+    state["pending"] = f"phone:trial:{branch_key}"
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text(
+                "¡Claro! Antes de pasarte el WhatsApp para agendar tu clase muestra, "
+                "compárteme tu número de teléfono 📱"
+            )
+        ],
+        "quick_replies": [],
+    }
+
+
+def _deliver_trial_whatsapp(state, branch_key):
+    branch = BRANCHES[branch_key]
+    state["pending"] = None
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text(
+                f"¡Perfecto! Escríbenos por WhatsApp de {branch['name']} y "
+                "agendamos tu clase muestra 🙌"
+            ),
+            _link(branch["whatsapp"], f"WhatsApp {branch['name']}"),
+        ],
+        "quick_replies": MAIN_QUICK_REPLIES,
+    }
+
+
 def _deliver_branch_info(state, topic, branch_key):
     if state.get("wellness_mode") and topic in {"location", "pricing", "schedules"}:
         return _deliver_wellness_info(state, topic)
@@ -317,13 +347,10 @@ def _deliver_branch_info(state, topic, branch_key):
             _image(branch["pricing_image"], f"Precios {branch['name']}"),
         ]
     elif topic == "trial":
-        messages = [
-            _text(
-                f"¡Perfecto! Escríbenos por WhatsApp de {branch['name']} y "
-                "agendamos tu clase muestra 🙌"
-            ),
-            _link(branch["whatsapp"], f"WhatsApp {branch['name']}"),
-        ]
+        phone = (state.get("lead", {}).get("phone") or "").strip()
+        if not phone:
+            return _ask_trial_phone(state, branch_key)
+        return _deliver_trial_whatsapp(state, branch_key)
     else:
         messages = [
             _text(
@@ -519,6 +546,21 @@ def _route(message: str, state: dict) -> dict:
                 "messages": [_text("¿Te refieres a Guadalupe o a Bosque Santa Anita?")],
                 "quick_replies": BRANCH_QUICK_REPLIES,
             }
+
+    if pending and pending.startswith("phone:trial:"):
+        branch_key = pending.split(":", 2)[2]
+        phone = detect_phone(message)
+        if phone:
+            return _deliver_trial_whatsapp(state, branch_key)
+        return {
+            "messages": [
+                _text(
+                    "Para agendar tu clase muestra necesito tu número de teléfono. "
+                    "Envíamelo por aquí y te paso el WhatsApp enseguida."
+                )
+            ],
+            "quick_replies": [],
+        }
 
     branch_key = detect_branch(message)
     if branch_key:
