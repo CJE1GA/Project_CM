@@ -1,7 +1,10 @@
-"""Excel storage for captured leads."""
+"""Lead storage for the chatbot, with cloud backends and local Excel fallback."""
 
+import json
 import os
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime
 
 import re
@@ -9,6 +12,7 @@ import re
 from config import LEADS_FILE, LEAD_SOURCE
 
 COLUMNS = ["Date", "Name", "Phone Number", "Program", "Branch", "Source"]
+GOOGLE_COLUMNS = ["Date", "Name", "Phone Number", "Program", "Branch", "Source", "Identifier"]
 UNSPECIFIED = "Sin especificar"
 INSTAGRAM_HANDLE_RE = re.compile(r"@[_a-zA-Z0-9.]+")
 
@@ -17,6 +21,146 @@ _lock = threading.Lock()
 
 def _path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), LEADS_FILE)
+
+
+def _google_config() -> dict:
+    return {
+        "spreadsheet_id": os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "").strip(),
+        "worksheet_name": os.environ.get("GOOGLE_SHEETS_WORKSHEET_NAME", "Leads").strip() or "Leads",
+        "service_account_json": os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip(),
+        "service_account_file": os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip(),
+    }
+
+
+def _apps_script_config() -> dict:
+    return {
+        "url": os.environ.get("GOOGLE_APPS_SCRIPT_URL", "").strip(),
+        "token": os.environ.get("GOOGLE_APPS_SCRIPT_TOKEN", "").strip(),
+    }
+
+
+def _sync_lead_to_apps_script(name: str, phone: str, program: str, branch: str, identifier: str) -> bool:
+    config = _apps_script_config()
+    if not config["url"]:
+        return False
+
+    payload = {
+        "token": config["token"],
+        "action": "upsert_lead",
+        "lead": {
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "name": name,
+            "phone": phone or "",
+            "program": program or UNSPECIFIED,
+            "branch": branch or UNSPECIFIED,
+            "source": LEAD_SOURCE,
+            "identifier": identifier,
+        },
+    }
+    request_obj = urllib.request.Request(
+        config["url"],
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request_obj, timeout=15) as response:
+            response_body = response.read().decode("utf-8").strip()
+        if not response_body:
+            return True
+        response_json = json.loads(response_body)
+        return bool(response_json.get("ok"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        print(f"[leads] No se pudo guardar en Google Apps Script: {exc}")
+        return False
+
+
+def _google_client():
+    config = _google_config()
+    if not config["spreadsheet_id"]:
+        return None
+
+    try:
+        import gspread
+    except ImportError:
+        print("[leads] gspread no instalado; se usará Excel local.")
+        return None
+
+    try:
+        if config["service_account_json"]:
+            credentials_info = json.loads(config["service_account_json"])
+            return gspread.service_account_from_dict(credentials_info)
+        if config["service_account_file"]:
+            return gspread.service_account(filename=config["service_account_file"])
+    except Exception as exc:
+        print(f"[leads] No se pudieron cargar credenciales de Google Sheets: {exc}")
+        return None
+
+    print("[leads] Faltan credenciales de Google Sheets; se usará Excel local.")
+    return None
+
+
+def _google_worksheet():
+    config = _google_config()
+    client = _google_client()
+    if not client:
+        return None
+
+    try:
+        spreadsheet = client.open_by_key(config["spreadsheet_id"])
+        try:
+            worksheet = spreadsheet.worksheet(config["worksheet_name"])
+        except Exception:
+            worksheet = spreadsheet.add_worksheet(title=config["worksheet_name"], rows=1000, cols=len(GOOGLE_COLUMNS))
+        return worksheet
+    except Exception as exc:
+        print(f"[leads] No se pudo abrir Google Sheets: {exc}")
+        return None
+
+
+def _ensure_google_headers(worksheet):
+    headers = worksheet.row_values(1)
+    if headers != GOOGLE_COLUMNS:
+        if not headers:
+            worksheet.append_row(GOOGLE_COLUMNS)
+            return
+        worksheet.update("A1:G1", [GOOGLE_COLUMNS])
+
+
+def _sync_lead_to_google_sheet(name: str, phone: str, program: str, branch: str, identifier: str) -> bool:
+    worksheet = _google_worksheet()
+    if worksheet is None:
+        return False
+
+    try:
+        _ensure_google_headers(worksheet)
+        all_rows = worksheet.get_all_values()
+        existing_row = None
+        for index, row in enumerate(all_rows[1:], start=2):
+            row_identifier = row[6].strip() if len(row) > 6 else ""
+            if row_identifier == identifier:
+                existing_row = index
+                break
+
+        values = [
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            name,
+            phone or "",
+            program or UNSPECIFIED,
+            branch or UNSPECIFIED,
+            LEAD_SOURCE,
+            identifier,
+        ]
+
+        if existing_row is None:
+            worksheet.append_row(values)
+        else:
+            worksheet.update(f"A{existing_row}:G{existing_row}", [values])
+        return True
+    except Exception as exc:
+        print(f"[leads] No se pudo guardar en Google Sheets: {exc}")
+        return False
 
 
 def _meaningful(value: str | None) -> bool:
@@ -67,19 +211,24 @@ def upsert_lead(
     branch: str = UNSPECIFIED,
     identifier: str | None = None,
 ) -> None:
-    try:
-        from openpyxl import Workbook, load_workbook
-    except ImportError:
-        print("[leads] openpyxl no instalado; el lead no se guardó en Excel.")
-        return
-
-    del Workbook, load_workbook
-
     with _lock:
+        lookup_value = normalize_identifier(identifier or name)
+        if _sync_lead_to_apps_script(name, phone, program, branch, lookup_value):
+            return
+        if _sync_lead_to_google_sheet(name, phone, program, branch, lookup_value):
+            return
+
+        try:
+            from openpyxl import Workbook, load_workbook
+        except ImportError:
+            print("[leads] openpyxl no instalado; el lead no se guardó en Excel.")
+            return
+
+        del Workbook, load_workbook
+
         workbook, sheet, path = _ensure_workbook()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         matching_rows = []
-        lookup_value = normalize_identifier(identifier or name)
 
         for row in range(sheet.max_row, 1, -1):
             row_name = sheet.cell(row=row, column=2).value
