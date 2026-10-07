@@ -302,7 +302,8 @@ def _ask_trial_phone(state, branch_key):
         "messages": [
             _text(
                 "¡Claro! Antes de pasarte el WhatsApp para agendar tu clase muestra, "
-                "compárteme tu número de teléfono 📱"
+                "compárteme tu número de teléfono, por favor📱, "
+                "Así podremos registrarte y darte un mejor servicio"
             )
         ],
         "quick_replies": [],
