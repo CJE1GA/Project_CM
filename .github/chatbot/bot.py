@@ -129,6 +129,42 @@ def detect_name(message: str):
         if any(word.lower() in {"guadalupe", "bosque", "anita", "running", "hyrox", "wellness"} for word in words):
             continue
         return " ".join(word.capitalize() for word in words)
+
+    text = (message or "").strip()
+    if not text:
+        return None
+    normalized = _normalize(text)
+    if any(token in normalized for token in [
+        "mi numero",
+        "mi número",
+        "telefono",
+        "teléfono",
+        "numero",
+        "número",
+        "clase muestra",
+        "horarios",
+        "precios",
+        "sucursales",
+        "hola",
+        "gracias",
+        "buenas",
+        "whatsapp",
+        "hyrox",
+        "wellness",
+        "running",
+        "guadalupe",
+        "bosque",
+        "anita",
+    ]):
+        return None
+
+    words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
+    if 2 <= len(words) <= 4:
+        cleaned = [word for word in words if word.lower() not in {"mi", "me", "llamo", "soy", "nombre", "es"}]
+        if 2 <= len(cleaned) <= 4:
+            candidate = " ".join(cleaned)
+            if not any(token in _normalize(candidate).lower() for token in ["guadalupe", "bosque", "anita", "hyrox", "running", "wellness", "horarios", "precios", "sucursales"]):
+                return " ".join(word.capitalize() for word in cleaned)
     return None
 
 
@@ -295,15 +331,27 @@ def _ask_branch(state, topic):
     }
 
 
+def _ask_trial_name(state, branch_key):
+    state["pending"] = f"name:trial:{branch_key}"
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text(
+                "¡Claro! Antes de enviarte el WhatsApp para agendar tu clase muestra, "
+                "¿me puedes compartir tu nombre completo? 📝"
+            )
+        ],
+        "quick_replies": [],
+    }
+
+
 def _ask_trial_phone(state, branch_key):
     state["pending"] = f"phone:trial:{branch_key}"
     state["branch"] = branch_key
     return {
         "messages": [
             _text(
-                "¡Claro! Antes de pasarte el WhatsApp para agendar tu clase muestra, "
-                "compárteme tu número de teléfono, por favor📱, "
-                "Así podremos registrarte y darte un mejor servicio"
+                "Gracias. Ahora necesito tu número de teléfono para registrarte y enviarte el WhatsApp 📱"
             )
         ],
         "quick_replies": [],
@@ -348,7 +396,10 @@ def _deliver_branch_info(state, topic, branch_key):
             _image(branch["pricing_image"], f"Precios {branch['name']}"),
         ]
     elif topic == "trial":
+        name = (state.get("lead", {}).get("name") or "").strip()
         phone = (state.get("lead", {}).get("phone") or "").strip()
+        if not name:
+            return _ask_trial_name(state, branch_key)
         if not phone:
             return _ask_trial_phone(state, branch_key)
         return _deliver_trial_whatsapp(state, branch_key)
@@ -547,6 +598,21 @@ def _route(message: str, state: dict) -> dict:
                 "messages": [_text("¿Te refieres a Guadalupe o a Bosque Santa Anita?")],
                 "quick_replies": BRANCH_QUICK_REPLIES,
             }
+
+    if pending and pending.startswith("name:trial:"):
+        branch_key = pending.split(":", 2)[2]
+        name = detect_name(message)
+        if name:
+            phone = (state.get("lead", {}).get("phone") or "").strip()
+            if phone:
+                return _deliver_trial_whatsapp(state, branch_key)
+            return _ask_trial_phone(state, branch_key)
+        return {
+            "messages": [
+                _text("Para agendar tu clase muestra necesito tu nombre completo antes de enviarte el WhatsApp.")
+            ],
+            "quick_replies": [],
+        }
 
     if pending and pending.startswith("phone:trial:"):
         branch_key = pending.split(":", 2)[2]
