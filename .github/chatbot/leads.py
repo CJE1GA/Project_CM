@@ -191,7 +191,68 @@ def _ensure_google_headers(worksheet):
         if not headers:
             worksheet.append_row(GOOGLE_COLUMNS)
             return
-        worksheet.update(f"A1:{_column_letter(len(GOOGLE_COLUMNS))}1", [GOOGLE_COLUMNS])
+        _migrate_google_sheet(worksheet, headers)
+
+
+def _google_row_uses_legacy_schema(headers: list[str]) -> bool:
+    normalized = [str(header or "").strip() for header in headers]
+    return normalized[: min(len(normalized), 7)] == ["Date", "Name", "Phone Number", "Program", "Branch", "Source", "Identifier"][: min(len(normalized), 7)]
+
+
+def _migrate_google_sheet(worksheet, headers) -> None:
+    all_rows = worksheet.get_all_values()
+    if len(all_rows) <= 1:
+        worksheet.clear()
+        worksheet.append_row(GOOGLE_COLUMNS)
+        return
+
+    data_rows = all_rows[1:]
+    migrated_rows = []
+    is_legacy_schema = _google_row_uses_legacy_schema(headers)
+
+    for row in data_rows:
+        if not any(str(cell or "").strip() for cell in row):
+            continue
+
+        if is_legacy_schema:
+            date_value = row[0] if len(row) > 0 else ""
+            year, month, day, hour = _split_timestamp(date_value)
+            migrated_rows.append([
+                year,
+                month,
+                day,
+                hour,
+                row[1] if len(row) > 1 else "",
+                row[2] if len(row) > 2 else "",
+                "",
+                "",
+                row[3] if len(row) > 3 else UNSPECIFIED,
+                row[4] if len(row) > 4 else UNSPECIFIED,
+                row[5] if len(row) > 5 else LEAD_SOURCE,
+                row[6] if len(row) > 6 else "",
+            ])
+            continue
+
+        year, month, day, hour = _split_timestamp((row[0] + " " + row[1] + " " + row[2] + " " + row[3]).strip())
+        migrated_rows.append([
+            row[0] if len(row) > 0 else year,
+            row[1] if len(row) > 1 else month,
+            row[2] if len(row) > 2 else day,
+            row[3] if len(row) > 3 else hour,
+            row[4] if len(row) > 4 else "",
+            row[5] if len(row) > 5 else "",
+            row[6] if len(row) > 6 else "",
+            row[7] if len(row) > 7 else "",
+            row[8] if len(row) > 8 else UNSPECIFIED,
+            row[9] if len(row) > 9 else UNSPECIFIED,
+            row[10] if len(row) > 10 else LEAD_SOURCE,
+            row[11] if len(row) > 11 else "",
+        ])
+
+    worksheet.clear()
+    worksheet.append_row(GOOGLE_COLUMNS)
+    if migrated_rows:
+        worksheet.append_rows(migrated_rows, value_input_option="USER_ENTERED")
 
 
 def _sync_lead_to_google_sheet(
@@ -212,7 +273,7 @@ def _sync_lead_to_google_sheet(
         all_rows = worksheet.get_all_values()
         existing_row = None
         for index, row in enumerate(all_rows[1:], start=2):
-            row_identifier = row[8].strip() if len(row) > 8 else ""
+            row_identifier = row[11].strip() if len(row) > 11 else ""
             if row_identifier == identifier:
                 existing_row = index
                 break
