@@ -187,11 +187,12 @@ def _google_worksheet():
 
 def _ensure_google_headers(worksheet):
     headers = worksheet.row_values(1)
-    if headers != GOOGLE_COLUMNS:
-        if not headers:
-            worksheet.append_row(GOOGLE_COLUMNS)
-            return
-        _migrate_google_sheet(worksheet, headers)
+    all_rows = worksheet.get_all_values()
+    if not headers:
+        worksheet.append_row(GOOGLE_COLUMNS)
+        return
+    if _google_sheet_needs_migration(headers, all_rows):
+        _migrate_google_sheet(worksheet, headers, all_rows)
 
 
 def _google_row_uses_legacy_schema(headers: list[str]) -> bool:
@@ -199,8 +200,30 @@ def _google_row_uses_legacy_schema(headers: list[str]) -> bool:
     return normalized[: min(len(normalized), 7)] == ["Date", "Name", "Phone Number", "Program", "Branch", "Source", "Identifier"][: min(len(normalized), 7)]
 
 
-def _migrate_google_sheet(worksheet, headers) -> None:
-    all_rows = worksheet.get_all_values()
+def _google_sheet_needs_migration(headers, all_rows) -> bool:
+    if headers != GOOGLE_COLUMNS:
+        return True
+    if len(all_rows) <= 1:
+        return False
+
+    first_data_row = all_rows[1]
+    if not first_data_row:
+        return False
+
+    first_cell = str(first_data_row[0] or "").strip()
+    if not first_cell:
+        return False
+
+    if first_cell.isdigit() and len(first_cell) == 4:
+        return False
+
+    if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", first_cell):
+        return True
+
+    return len(first_data_row) < len(GOOGLE_COLUMNS) or _google_row_uses_legacy_schema(headers)
+
+
+def _migrate_google_sheet(worksheet, headers, all_rows) -> None:
     if len(all_rows) <= 1:
         worksheet.clear()
         worksheet.append_row(GOOGLE_COLUMNS)

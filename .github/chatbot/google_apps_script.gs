@@ -73,6 +73,7 @@ function getLeadSheet_() {
 
 function ensureHeaders_(sheet) {
   const existing = sheet.getRange(1, 1, 1, HEADERS.length).getValues()[0];
+  const allRows = sheet.getDataRange().getValues();
   const hasHeaders = existing.some(function(value) {
     return String(value || '').trim() !== '';
   });
@@ -80,12 +81,35 @@ function ensureHeaders_(sheet) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
     return;
   }
-  const sameHeaders = HEADERS.every(function(header, index) {
-    return String(existing[index] || '').trim() === header;
-  });
-  if (!sameHeaders) {
+  if (sheetNeedsMigration_(existing, allRows)) {
     migrateLegacySheet_(sheet);
   }
+}
+
+function sheetNeedsMigration_(headers, rows) {
+  const sameHeaders = HEADERS.every(function(header, index) {
+    return String(headers[index] || '').trim() === header;
+  });
+  if (!sameHeaders) {
+    return true;
+  }
+  if (!rows || rows.length <= 1) {
+    return false;
+  }
+
+  const firstDataRow = rows[1] || [];
+  const firstCell = String(firstDataRow[0] || '').trim();
+  if (!firstCell) {
+    return false;
+  }
+  if (/^\d{4}$/.test(firstCell)) {
+    return false;
+  }
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(firstCell)) {
+    return true;
+  }
+
+  return firstDataRow.length < HEADERS.length || String(headers[0] || '').trim() === 'Date';
 }
 
 function migrateLegacySheet_(sheet) {
