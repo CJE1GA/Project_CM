@@ -222,7 +222,7 @@ def _sync_lead_to_google_sheet(
             f"{datetime.now().month:02d}",
             f"{datetime.now().day:02d}",
             f"{datetime.now().hour:02d}:00",
-            email or "",
+            name,
             phone or "",
             email or "",
             birth_date or "",
