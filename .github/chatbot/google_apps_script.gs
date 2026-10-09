@@ -1,6 +1,6 @@
 const DEFAULT_SHEET_NAME = 'Leads';
 const DEFAULT_TOKEN = '';
-const HEADERS = ['Date', 'Name', 'Phone Number', 'Program', 'Branch', 'Source', 'Identifier'];
+const HEADERS = ['Year', 'Month', 'Day', 'Hour', 'Name', 'Phone Number', 'Email', 'Birth Date', 'Program', 'Branch', 'Source', 'Identifier'];
 
 function doGet() {
   return jsonResponse({ ok: true, service: 'chatbot-leads-sheet' });
@@ -29,9 +29,14 @@ function doPost(e) {
     const rows = sheet.getDataRange().getValues();
     const rowIndex = findLeadRow_(rows, identifier);
     const values = [[
-      normalizeValue(lead.date) || new Date(),
+      normalizeValue(lead.year),
+      normalizeValue(lead.month),
+      normalizeValue(lead.day),
+      normalizeValue(lead.hour),
       normalizeValue(lead.name),
       normalizeValue(lead.phone),
+      normalizeValue(lead.email),
+      normalizeValue(lead.birth_date),
       normalizeValue(lead.program) || 'Sin especificar',
       normalizeValue(lead.branch) || 'Sin especificar',
       normalizeValue(lead.source) || 'Instagram',
@@ -85,7 +90,7 @@ function ensureHeaders_(sheet) {
 
 function findLeadRow_(rows, identifier) {
   for (let index = 1; index < rows.length; index += 1) {
-    const rowIdentifier = normalizeValue(rows[index][6]);
+    const rowIdentifier = normalizeValue(rows[index][11]);
     if (rowIdentifier === identifier) {
       return index + 1;
     }

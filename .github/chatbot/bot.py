@@ -18,6 +18,11 @@ MAIN_QUICK_REPLIES = [
 WELLNESS_HELP_QUICK_REPLIES = ["Precios", "Sucursales", "Horarios"]
 
 PHONE_RE = re.compile(r"\+?[\d\s\-()]{8,20}")
+EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+DATE_OF_BIRTH_RE = re.compile(
+    r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+de\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+\s+de\s+\d{4})\b",
+    re.IGNORECASE,
+)
 NAME_PATTERNS = [
     re.compile(r"\bmi nombre es\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,3})\b", re.IGNORECASE),
     re.compile(r"\bme llamo\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){1,3})\b", re.IGNORECASE),
@@ -119,6 +124,20 @@ def detect_phone(message: str):
     return None
 
 
+def detect_email(message: str):
+    match = EMAIL_RE.search(message or "")
+    if match:
+        return match.group(0).strip().lower()
+    return None
+
+
+def detect_birth_date(message: str):
+    match = DATE_OF_BIRTH_RE.search(message or "")
+    if match:
+        return " ".join(match.group(0).strip().split())
+    return None
+
+
 def detect_name(message: str):
     for pattern in NAME_PATTERNS:
         match = pattern.search(message or "")
@@ -174,6 +193,8 @@ def new_state() -> dict:
         "lead": {
             "name": "",
             "phone": "",
+            "email": "",
+            "birth_date": "",
             "program": UNSPECIFIED,
             "branch": UNSPECIFIED,
             "registered": False,
@@ -345,14 +366,34 @@ def _ask_trial_name(state, branch_key):
     }
 
 
+def _ask_trial_email(state, branch_key):
+    state["pending"] = f"email:trial:{branch_key}"
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text("Gracias. Ahora compárteme tu correo electrónico, por favor ✉️")
+        ],
+        "quick_replies": [],
+    }
+
+
 def _ask_trial_phone(state, branch_key):
     state["pending"] = f"phone:trial:{branch_key}"
     state["branch"] = branch_key
     return {
         "messages": [
-            _text(
-                "Gracias. Ahora necesito tu número de teléfono para registrarte y enviarte el WhatsApp 📱"
-            )
+            _text("Perfecto. Ahora necesito tu número de teléfono 📱")
+        ],
+        "quick_replies": [],
+    }
+
+
+def _ask_trial_birth_date(state, branch_key):
+    state["pending"] = f"dob:trial:{branch_key}"
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text("Por último, compárteme tu fecha de nacimiento, por favor 📅")
         ],
         "quick_replies": [],
     }
@@ -365,13 +406,26 @@ def _deliver_trial_whatsapp(state, branch_key):
     return {
         "messages": [
             _text(
-                f"¡Perfecto! Escríbenos por WhatsApp de {branch['name']} y "
+                f"¡Perfecto! Ya tengo tus datos. Escríbenos por WhatsApp de {branch['name']} y "
                 "agendamos tu clase muestra 🙌"
             ),
             _link(branch["whatsapp"], f"WhatsApp {branch['name']}"),
         ],
         "quick_replies": MAIN_QUICK_REPLIES,
     }
+
+
+def _advance_trial_flow(state, branch_key):
+    lead = state.get("lead", {})
+    if not (lead.get("name") or "").strip():
+        return _ask_trial_name(state, branch_key)
+    if not (lead.get("email") or "").strip():
+        return _ask_trial_email(state, branch_key)
+    if not (lead.get("phone") or "").strip():
+        return _ask_trial_phone(state, branch_key)
+    if not (lead.get("birth_date") or "").strip():
+        return _ask_trial_birth_date(state, branch_key)
+    return _deliver_trial_whatsapp(state, branch_key)
 
 
 def _deliver_branch_info(state, topic, branch_key):
@@ -396,13 +450,7 @@ def _deliver_branch_info(state, topic, branch_key):
             _image(branch["pricing_image"], f"Precios {branch['name']}"),
         ]
     elif topic == "trial":
-        name = (state.get("lead", {}).get("name") or "").strip()
-        phone = (state.get("lead", {}).get("phone") or "").strip()
-        if not name:
-            return _ask_trial_name(state, branch_key)
-        if not phone:
-            return _ask_trial_phone(state, branch_key)
-        return _deliver_trial_whatsapp(state, branch_key)
+        return _advance_trial_flow(state, branch_key)
     else:
         messages = [
             _text(
@@ -438,7 +486,15 @@ def _lead_identifier(state: dict) -> str:
 def _sync_lead(state: dict, message: str) -> bool:
     lead = state.setdefault(
         "lead",
-        {"name": "", "phone": "", "program": UNSPECIFIED, "branch": UNSPECIFIED, "registered": False},
+        {
+            "name": "",
+            "phone": "",
+            "email": "",
+            "birth_date": "",
+            "program": UNSPECIFIED,
+            "branch": UNSPECIFIED,
+            "registered": False,
+        },
     )
     changed = not lead.get("registered", False)
 
@@ -450,6 +506,16 @@ def _sync_lead(state: dict, message: str) -> bool:
     phone = detect_phone(message)
     if phone and phone != lead.get("phone"):
         lead["phone"] = phone
+        changed = True
+
+    email = detect_email(message)
+    if email and email != lead.get("email"):
+        lead["email"] = email
+        changed = True
+
+    birth_date = detect_birth_date(message)
+    if birth_date and birth_date != lead.get("birth_date"):
+        lead["birth_date"] = birth_date
         changed = True
 
     program = detect_program(message)
@@ -468,6 +534,8 @@ def _sync_lead(state: dict, message: str) -> bool:
         upsert_lead(
             _lead_name(state),
             lead.get("phone", ""),
+            lead.get("email", ""),
+            lead.get("birth_date", ""),
             lead.get("program", UNSPECIFIED),
             lead.get("branch", UNSPECIFIED),
             identifier=_lead_identifier(state),
@@ -480,6 +548,10 @@ def _sync_lead(state: dict, message: str) -> bool:
 def _is_data_update_only(message: str) -> bool:
     normalized = _normalize(message)
     if detect_phone(message):
+        return True
+    if detect_email(message):
+        return True
+    if detect_birth_date(message):
         return True
     if detect_name(message):
         return True
@@ -601,12 +673,8 @@ def _route(message: str, state: dict) -> dict:
 
     if pending and pending.startswith("name:trial:"):
         branch_key = pending.split(":", 2)[2]
-        name = detect_name(message)
-        if name:
-            phone = (state.get("lead", {}).get("phone") or "").strip()
-            if phone:
-                return _deliver_trial_whatsapp(state, branch_key)
-            return _ask_trial_phone(state, branch_key)
+        if (state.get("lead", {}).get("name") or "").strip():
+            return _advance_trial_flow(state, branch_key)
         return {
             "messages": [
                 _text("Para agendar tu clase muestra necesito tu nombre completo antes de enviarte el WhatsApp.")
@@ -614,17 +682,38 @@ def _route(message: str, state: dict) -> dict:
             "quick_replies": [],
         }
 
+    if pending and pending.startswith("email:trial:"):
+        branch_key = pending.split(":", 2)[2]
+        if (state.get("lead", {}).get("email") or "").strip():
+            return _advance_trial_flow(state, branch_key)
+        return {
+            "messages": [
+                _text("Para agendar tu clase muestra necesito tu correo electrónico antes de continuar.")
+            ],
+            "quick_replies": [],
+        }
+
     if pending and pending.startswith("phone:trial:"):
         branch_key = pending.split(":", 2)[2]
-        phone = detect_phone(message)
-        if phone:
-            return _deliver_trial_whatsapp(state, branch_key)
+        if (state.get("lead", {}).get("phone") or "").strip():
+            return _advance_trial_flow(state, branch_key)
         return {
             "messages": [
                 _text(
                     "Para agendar tu clase muestra necesito tu número de teléfono. "
-                    "Envíamelo por aquí y te paso el WhatsApp enseguida."
+                    "Envíamelo por aquí y continuamos enseguida."
                 )
+            ],
+            "quick_replies": [],
+        }
+
+    if pending and pending.startswith("dob:trial:"):
+        branch_key = pending.split(":", 2)[2]
+        if (state.get("lead", {}).get("birth_date") or "").strip():
+            return _deliver_trial_whatsapp(state, branch_key)
+        return {
+            "messages": [
+                _text("Para agendar tu clase muestra necesito tu fecha de nacimiento antes de enviarte el WhatsApp.")
             ],
             "quick_replies": [],
         }

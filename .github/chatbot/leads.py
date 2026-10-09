@@ -11,8 +11,8 @@ import re
 
 from config import LEADS_FILE, LEAD_SOURCE
 
-COLUMNS = ["Date", "Name", "Phone Number", "Program", "Branch", "Source"]
-GOOGLE_COLUMNS = ["Date", "Name", "Phone Number", "Program", "Branch", "Source", "Identifier"]
+COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Email", "Birth Date", "Program", "Branch", "Source"]
+GOOGLE_COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Email", "Birth Date", "Program", "Branch", "Source", "Identifier"]
 UNSPECIFIED = "Sin especificar"
 INSTAGRAM_HANDLE_RE = re.compile(r"@[_a-zA-Z0-9.]+")
 
@@ -39,7 +39,68 @@ def _apps_script_config() -> dict:
     }
 
 
-def _sync_lead_to_apps_script(name: str, phone: str, program: str, branch: str, identifier: str) -> bool:
+def _column_letter(index: int) -> str:
+    letters = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _split_timestamp(value) -> tuple[str, str, str, str]:
+    if isinstance(value, datetime):
+        return (
+            str(value.year),
+            f"{value.month:02d}",
+            f"{value.day:02d}",
+            f"{value.hour:02d}:00",
+        )
+
+    text = str(value or "").strip()
+    if not text:
+        return "", "", "", ""
+
+    patterns = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+    ]
+    for pattern in patterns:
+        try:
+            parsed = datetime.strptime(text, pattern)
+            return (
+                str(parsed.year),
+                f"{parsed.month:02d}",
+                f"{parsed.day:02d}",
+                f"{parsed.hour:02d}:00",
+            )
+        except ValueError:
+            continue
+
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return (
+            str(parsed.year),
+            f"{parsed.month:02d}",
+            f"{parsed.day:02d}",
+            f"{parsed.hour:02d}:00",
+        )
+    except ValueError:
+        return text[:4], "", "", ""
+
+
+def _sync_lead_to_apps_script(
+    name: str,
+    phone: str,
+    email: str,
+    birth_date: str,
+    program: str,
+    branch: str,
+    identifier: str,
+) -> bool:
     config = _apps_script_config()
     if not config["url"]:
         return False
@@ -48,9 +109,14 @@ def _sync_lead_to_apps_script(name: str, phone: str, program: str, branch: str, 
         "token": config["token"],
         "action": "upsert_lead",
         "lead": {
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "year": str(datetime.now().year),
+            "month": f"{datetime.now().month:02d}",
+            "day": f"{datetime.now().day:02d}",
+            "hour": f"{datetime.now().hour:02d}:00",
             "name": name,
             "phone": phone or "",
+            "email": email or "",
+            "birth_date": birth_date or "",
             "program": program or UNSPECIFIED,
             "branch": branch or UNSPECIFIED,
             "source": LEAD_SOURCE,
@@ -125,10 +191,18 @@ def _ensure_google_headers(worksheet):
         if not headers:
             worksheet.append_row(GOOGLE_COLUMNS)
             return
-        worksheet.update("A1:G1", [GOOGLE_COLUMNS])
+        worksheet.update(f"A1:{_column_letter(len(GOOGLE_COLUMNS))}1", [GOOGLE_COLUMNS])
 
 
-def _sync_lead_to_google_sheet(name: str, phone: str, program: str, branch: str, identifier: str) -> bool:
+def _sync_lead_to_google_sheet(
+    name: str,
+    phone: str,
+    email: str,
+    birth_date: str,
+    program: str,
+    branch: str,
+    identifier: str,
+) -> bool:
     worksheet = _google_worksheet()
     if worksheet is None:
         return False
@@ -138,15 +212,20 @@ def _sync_lead_to_google_sheet(name: str, phone: str, program: str, branch: str,
         all_rows = worksheet.get_all_values()
         existing_row = None
         for index, row in enumerate(all_rows[1:], start=2):
-            row_identifier = row[6].strip() if len(row) > 6 else ""
+            row_identifier = row[8].strip() if len(row) > 8 else ""
             if row_identifier == identifier:
                 existing_row = index
                 break
 
         values = [
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            str(datetime.now().year),
+            f"{datetime.now().month:02d}",
+            f"{datetime.now().day:02d}",
+            f"{datetime.now().hour:02d}:00",
             name,
             phone or "",
+            email or "",
+            birth_date or "",
             program or UNSPECIFIED,
             branch or UNSPECIFIED,
             LEAD_SOURCE,
@@ -156,7 +235,7 @@ def _sync_lead_to_google_sheet(name: str, phone: str, program: str, branch: str,
         if existing_row is None:
             worksheet.append_row(values)
         else:
-            worksheet.update(f"A{existing_row}:G{existing_row}", [values])
+            worksheet.update(f"A{existing_row}:{_column_letter(len(GOOGLE_COLUMNS))}{existing_row}", [values])
         return True
     except Exception as exc:
         print(f"[leads] No se pudo guardar en Google Sheets: {exc}")
@@ -177,6 +256,38 @@ def _coalesce(current: str | None, incoming: str | None) -> str:
     return ""
 
 
+def _legacy_workbook_row(sheet, row: int) -> bool:
+    return not sheet.cell(row=row, column=11).value and sheet.cell(row=row, column=8).value == LEAD_SOURCE
+
+
+def _migrate_legacy_workbook(sheet) -> None:
+    headers = [sheet.cell(row=1, column=index + 1).value for index in range(len(COLUMNS))]
+    if headers == COLUMNS:
+        return
+
+    legacy_rows = []
+    for row in range(2, sheet.max_row + 1):
+        year, month, day, hour = _split_timestamp(sheet.cell(row=row, column=1).value)
+        legacy_rows.append([
+            year,
+            month,
+            day,
+            hour,
+            sheet.cell(row=row, column=2).value,
+            sheet.cell(row=row, column=3).value,
+            sheet.cell(row=row, column=4).value,
+            sheet.cell(row=row, column=5).value,
+            sheet.cell(row=row, column=6).value,
+            sheet.cell(row=row, column=7).value,
+            sheet.cell(row=row, column=8).value,
+        ])
+
+    sheet.delete_rows(1, sheet.max_row)
+    sheet.append(COLUMNS)
+    for row_values in legacy_rows:
+        sheet.append(row_values)
+
+
 def _ensure_workbook():
     from openpyxl import Workbook, load_workbook
 
@@ -189,6 +300,10 @@ def _ensure_workbook():
         sheet = workbook.active
         sheet.title = "Leads"
         sheet.append(COLUMNS)
+
+    headers = [sheet.cell(row=1, column=index + 1).value for index in range(len(COLUMNS))]
+    if headers != COLUMNS:
+        _migrate_legacy_workbook(sheet)
 
     return workbook, sheet, path
 
@@ -207,15 +322,17 @@ def normalize_identifier(value: str | None) -> str:
 def upsert_lead(
     name: str,
     phone: str = "",
+    email: str = "",
+    birth_date: str = "",
     program: str = UNSPECIFIED,
     branch: str = UNSPECIFIED,
     identifier: str | None = None,
 ) -> None:
     with _lock:
         lookup_value = normalize_identifier(identifier or name)
-        if _sync_lead_to_apps_script(name, phone, program, branch, lookup_value):
+        if _sync_lead_to_apps_script(name, phone, email, birth_date, program, branch, lookup_value):
             return
-        if _sync_lead_to_google_sheet(name, phone, program, branch, lookup_value):
+        if _sync_lead_to_google_sheet(name, phone, email, birth_date, program, branch, lookup_value):
             return
 
         try:
@@ -232,16 +349,21 @@ def upsert_lead(
 
         for row in range(sheet.max_row, 1, -1):
             row_name = sheet.cell(row=row, column=2).value
-            row_source = sheet.cell(row=row, column=6).value
+            row_source = sheet.cell(row=row, column=8).value or sheet.cell(row=row, column=6).value
             row_identifier = _extract_identifier(row_name)
             if row_source == LEAD_SOURCE and row_identifier == lookup_value:
                 matching_rows.append(row)
 
         if not matching_rows:
             sheet.append([
-                timestamp,
+                str(datetime.now().year),
+                f"{datetime.now().month:02d}",
+                f"{datetime.now().day:02d}",
+                f"{datetime.now().hour:02d}:00",
                 name,
                 phone or "",
+                email or "",
+                birth_date or "",
                 program or UNSPECIFIED,
                 branch or UNSPECIFIED,
                 LEAD_SOURCE,
@@ -249,24 +371,38 @@ def upsert_lead(
         else:
             merged_name = name
             merged_phone = phone or ""
+            merged_email = email or ""
+            merged_birth_date = birth_date or ""
             merged_program = program or UNSPECIFIED
             merged_branch = branch or UNSPECIFIED
+            merged_year, merged_month, merged_day, merged_hour = _split_timestamp(datetime.now())
 
             for row in reversed(matching_rows):
-                current_name = str(sheet.cell(row=row, column=2).value or "").strip()
+                current_name = str(sheet.cell(row=row, column=5).value or "").strip()
                 if len(current_name) > len(merged_name):
                     merged_name = current_name
-                merged_phone = _coalesce(merged_phone, sheet.cell(row=row, column=3).value)
-                merged_program = _coalesce(merged_program, sheet.cell(row=row, column=4).value) or UNSPECIFIED
-                merged_branch = _coalesce(merged_branch, sheet.cell(row=row, column=5).value) or UNSPECIFIED
+                merged_phone = _coalesce(merged_phone, sheet.cell(row=row, column=6).value)
+                merged_email = _coalesce(merged_email, sheet.cell(row=row, column=7).value)
+                merged_birth_date = _coalesce(merged_birth_date, sheet.cell(row=row, column=8).value)
+                if _legacy_workbook_row(sheet, row):
+                    merged_program = _coalesce(merged_program, sheet.cell(row=row, column=6).value) or UNSPECIFIED
+                    merged_branch = _coalesce(merged_branch, sheet.cell(row=row, column=7).value) or UNSPECIFIED
+                else:
+                    merged_program = _coalesce(merged_program, sheet.cell(row=row, column=9).value) or UNSPECIFIED
+                    merged_branch = _coalesce(merged_branch, sheet.cell(row=row, column=10).value) or UNSPECIFIED
 
             for row in matching_rows:
                 sheet.delete_rows(row, 1)
 
             sheet.append([
-                timestamp,
+                merged_year,
+                merged_month,
+                merged_day,
+                merged_hour,
                 merged_name,
                 merged_phone,
+                merged_email,
+                merged_birth_date,
                 merged_program,
                 merged_branch,
                 LEAD_SOURCE,
@@ -290,12 +426,24 @@ def deduplicate_leads() -> int:
         removed = 0
 
         for row in range(2, sheet.max_row + 1):
-            date_value = sheet.cell(row=row, column=1).value
-            name_value = sheet.cell(row=row, column=2).value
-            phone_value = sheet.cell(row=row, column=3).value
-            program_value = sheet.cell(row=row, column=4).value
-            branch_value = sheet.cell(row=row, column=5).value
-            source_value = sheet.cell(row=row, column=6).value
+            year_value = sheet.cell(row=row, column=1).value
+            month_value = sheet.cell(row=row, column=2).value
+            day_value = sheet.cell(row=row, column=3).value
+            hour_value = sheet.cell(row=row, column=4).value
+            name_value = sheet.cell(row=row, column=5).value
+            phone_value = sheet.cell(row=row, column=6).value
+            if _legacy_workbook_row(sheet, row):
+                email_value = ""
+                birth_date_value = ""
+                program_value = sheet.cell(row=row, column=9).value
+                branch_value = sheet.cell(row=row, column=10).value
+                source_value = sheet.cell(row=row, column=11).value
+            else:
+                email_value = sheet.cell(row=row, column=7).value
+                birth_date_value = sheet.cell(row=row, column=8).value
+                program_value = sheet.cell(row=row, column=9).value
+                branch_value = sheet.cell(row=row, column=10).value
+                source_value = sheet.cell(row=row, column=11).value
 
             if not name_value:
                 continue
@@ -306,8 +454,14 @@ def deduplicate_leads() -> int:
                 key,
                 {
                     "date": date_value,
+                    "year": str(year_value or ""),
+                    "month": str(month_value or ""),
+                    "day": str(day_value or ""),
+                    "hour": str(hour_value or ""),
                     "name": normalized_name,
                     "phone": "",
+                    "email": "",
+                    "birth_date": "",
                     "program": UNSPECIFIED,
                     "branch": UNSPECIFIED,
                     "source": source_value or LEAD_SOURCE,
@@ -319,17 +473,27 @@ def deduplicate_leads() -> int:
             if len(normalized_name) > len(item["name"]):
                 item["name"] = normalized_name
             item["phone"] = _coalesce(item["phone"], phone_value)
+            item["email"] = _coalesce(item["email"], email_value)
+            item["birth_date"] = _coalesce(item["birth_date"], birth_date_value)
             item["program"] = _coalesce(item["program"], program_value) or UNSPECIFIED
             item["branch"] = _coalesce(item["branch"], branch_value) or UNSPECIFIED
-            item["date"] = date_value or item["date"]
+            item["year"] = str(year_value or item["year"])
+            item["month"] = str(month_value or item["month"])
+            item["day"] = str(day_value or item["day"])
+            item["hour"] = str(hour_value or item["hour"])
 
         rows = [COLUMNS]
         for item in grouped.values():
             removed += max(item["count"] - 1, 0)
             rows.append([
-                item["date"],
+                item["year"],
+                item["month"],
+                item["day"],
+                item["hour"],
                 item["name"],
                 item["phone"],
+                item["email"],
+                item["birth_date"],
                 item["program"],
                 item["branch"],
                 item["source"],

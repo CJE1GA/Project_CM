@@ -5,13 +5,13 @@ BRANCHES = {
         "name": "Guadalupe",
         "emoji": "\U0001F4CD",
         "pricing_image": "/static/images/precios_guadalupe.png",
-        "whatsapp": "https://wa.me/528111111111?text=Hola%2C%20quiero%20mi%20clase%20muestra%20en%20Guadalupe",
+        "whatsapp": "https://wa.me/523321647829?text=Hola%2C%20quiero%20mi%20clase%20muestra%20en%20Guadalupe",
     },
     "bosque": {
         "name": "Bosque Santa Anita",
         "emoji": "\U0001F4CD",
         "pricing_image": "/static/images/precios_bosque_santa_anita.png",
-        "whatsapp": "https://wa.me/528122222222?text=Hola%2C%20quiero%20mi%20clase%20muestra%20en%20Bosque%20Santa%20Anita",
+        "whatsapp": "https://wa.me/523310749177?text=Hola%2C%20quiero%20mi%20clase%20muestra%20en%20Bosque%20Santa%20Anita",
     },
 }
 
@@ -19,7 +19,7 @@ WELLNESS = {
     "label": "Wellness",
     "pricing_image": "/static/images/precios_guadalupe.png",
     "location_branch": "guadalupe",
-    "whatsapp": "https://wa.me/AQUI_VA_EL_NUMERO?text=Hola%2C%20quiero%20agendar%20mi%20cita%20de%20Wellness",
+    "whatsapp": "https://wa.me/523333021949?text=Hola%2C%20quiero%20agendar%20mi%20cita%20de%20Wellness",
 }
 
 SCHEDULE_TEXT = (
