@@ -11,8 +11,8 @@ import re
 
 from config import LEADS_FILE, LEAD_SOURCE
 
-COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Email", "Birth Date", "Program", "Branch", "Source"]
-GOOGLE_COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Email", "Birth Date", "Program", "Branch", "Source", "Identifier"]
+COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Mail", "Birth Date", "Program", "Branch", "Source"]
+GOOGLE_COLUMNS = ["Year", "Month", "Day", "Hour", "Name", "Phone Number", "Mail", "Birth Date", "Program", "Branch", "Source", "Identifier"]
 UNSPECIFIED = "Sin especificar"
 INSTAGRAM_HANDLE_RE = re.compile(r"@[_a-zA-Z0-9.]+")
 
@@ -115,7 +115,7 @@ def _sync_lead_to_apps_script(
             "hour": f"{datetime.now().hour:02d}:00",
             "name": name,
             "phone": phone or "",
-            "email": email or "",
+            "mail": email or "",
             "birth_date": birth_date or "",
             "program": program or UNSPECIFIED,
             "branch": branch or UNSPECIFIED,
@@ -222,7 +222,7 @@ def _sync_lead_to_google_sheet(
             f"{datetime.now().month:02d}",
             f"{datetime.now().day:02d}",
             f"{datetime.now().hour:02d}:00",
-            name,
+            email or "",
             phone or "",
             email or "",
             birth_date or "",
@@ -433,13 +433,13 @@ def deduplicate_leads() -> int:
             name_value = sheet.cell(row=row, column=5).value
             phone_value = sheet.cell(row=row, column=6).value
             if _legacy_workbook_row(sheet, row):
-                email_value = ""
+                mail_value = ""
                 birth_date_value = ""
                 program_value = sheet.cell(row=row, column=9).value
                 branch_value = sheet.cell(row=row, column=10).value
                 source_value = sheet.cell(row=row, column=11).value
             else:
-                email_value = sheet.cell(row=row, column=7).value
+                mail_value = sheet.cell(row=row, column=7).value
                 birth_date_value = sheet.cell(row=row, column=8).value
                 program_value = sheet.cell(row=row, column=9).value
                 branch_value = sheet.cell(row=row, column=10).value
@@ -453,14 +453,13 @@ def deduplicate_leads() -> int:
             item = grouped.setdefault(
                 key,
                 {
-                    "date": date_value,
                     "year": str(year_value or ""),
                     "month": str(month_value or ""),
                     "day": str(day_value or ""),
                     "hour": str(hour_value or ""),
                     "name": normalized_name,
                     "phone": "",
-                    "email": "",
+                    "mail": "",
                     "birth_date": "",
                     "program": UNSPECIFIED,
                     "branch": UNSPECIFIED,
@@ -473,7 +472,7 @@ def deduplicate_leads() -> int:
             if len(normalized_name) > len(item["name"]):
                 item["name"] = normalized_name
             item["phone"] = _coalesce(item["phone"], phone_value)
-            item["email"] = _coalesce(item["email"], email_value)
+            item["mail"] = _coalesce(item["mail"], mail_value)
             item["birth_date"] = _coalesce(item["birth_date"], birth_date_value)
             item["program"] = _coalesce(item["program"], program_value) or UNSPECIFIED
             item["branch"] = _coalesce(item["branch"], branch_value) or UNSPECIFIED
@@ -492,7 +491,7 @@ def deduplicate_leads() -> int:
                 item["hour"],
                 item["name"],
                 item["phone"],
-                item["email"],
+                item["mail"],
                 item["birth_date"],
                 item["program"],
                 item["branch"],

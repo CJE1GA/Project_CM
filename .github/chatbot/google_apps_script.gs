@@ -1,6 +1,6 @@
 const DEFAULT_SHEET_NAME = 'Leads';
 const DEFAULT_TOKEN = '';
-const HEADERS = ['Year', 'Month', 'Day', 'Hour', 'Name', 'Phone Number', 'Email', 'Birth Date', 'Program', 'Branch', 'Source', 'Identifier'];
+const HEADERS = ['Year', 'Month', 'Day', 'Hour', 'Name', 'Phone Number', 'Mail', 'Birth Date', 'Program', 'Branch', 'Source', 'Identifier'];
 
 function doGet() {
   return jsonResponse({ ok: true, service: 'chatbot-leads-sheet' });
@@ -35,7 +35,7 @@ function doPost(e) {
       normalizeValue(lead.hour),
       normalizeValue(lead.name),
       normalizeValue(lead.phone),
-      normalizeValue(lead.email),
+      normalizeValue(lead.mail || lead.email),
       normalizeValue(lead.birth_date),
       normalizeValue(lead.program) || 'Sin especificar',
       normalizeValue(lead.branch) || 'Sin especificar',
@@ -84,8 +84,89 @@ function ensureHeaders_(sheet) {
     return String(existing[index] || '').trim() === header;
   });
   if (!sameHeaders) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    migrateLegacySheet_(sheet);
   }
+}
+
+function migrateLegacySheet_(sheet) {
+  const allRows = sheet.getDataRange().getValues();
+  if (!allRows.length) {
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    return;
+  }
+
+  const legacyRows = allRows.slice(1);
+  const normalizedRows = legacyRows.map(function(row) {
+    const legacyDate = row[0];
+    const splitDate = splitLegacyDate_(legacyDate);
+    return [
+      splitDate.year,
+      splitDate.month,
+      splitDate.day,
+      splitDate.hour,
+      normalizeValue(row[1]),
+      normalizeValue(row[2]),
+      '',
+      '',
+      normalizeValue(row[3]) || 'Sin especificar',
+      normalizeValue(row[4]) || 'Sin especificar',
+      normalizeValue(row[5]) || 'Instagram',
+      normalizeValue(row[6]),
+    ];
+  });
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  if (normalizedRows.length) {
+    sheet.getRange(2, 1, normalizedRows.length, HEADERS.length).setValues(normalizedRows);
+  }
+}
+
+function splitLegacyDate_(value) {
+  if (value instanceof Date) {
+    return {
+      year: String(value.getFullYear()),
+      month: pad2_(value.getMonth() + 1),
+      day: pad2_(value.getDate()),
+      hour: pad2_(value.getHours()) + ':00',
+    };
+  }
+
+  const text = String(value || '').trim();
+  if (!text) {
+    return { year: '', month: '', day: '', hour: '' };
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})(?::\d{2}(?::\d{2})?)?)?/);
+  if (isoMatch) {
+    return {
+      year: isoMatch[1],
+      month: pad2_(isoMatch[2]),
+      day: pad2_(isoMatch[3]),
+      hour: pad2_(isoMatch[4] || '0') + ':00',
+    };
+  }
+
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2})(?::\d{2})?)?/);
+  if (slashMatch) {
+    return {
+      year: slashMatch[3].length === 2 ? '20' + slashMatch[3] : slashMatch[3],
+      month: pad2_(slashMatch[2]),
+      day: pad2_(slashMatch[1]),
+      hour: pad2_(slashMatch[4] || '0') + ':00',
+    };
+  }
+
+  return {
+    year: text.slice(0, 4),
+    month: '',
+    day: '',
+    hour: '',
+  };
+}
+
+function pad2_(value) {
+  return String(value || '').padStart(2, '0');
 }
 
 function findLeadRow_(rows, identifier) {

@@ -57,6 +57,7 @@ $env:GOOGLE_SERVICE_ACCOUNT_FILE="/ruta/al/service-account.json"
 
 Si no quieres usar Google Cloud, la alternativa gratis es Google Sheets + Apps Script.
 Ese backend guarda los mismos campos que el Excel local, incluyendo Year, Month, Day y Hour.
+Si la pestaña ya existía con el formato viejo, el Web App la migra a la nueva estructura al volver a ejecutarse.
 Solo necesitas publicar un Web App y guardar su URL:
 
 ```powershell
@@ -102,7 +103,7 @@ python test_flows.py
 - Mensaje de bienvenida al iniciar/reiniciar la conversación.
 - FAQs: ubicaciones, horarios, HYROX, precios y clase muestra.
 - Preguntas de seguimiento (sucursal) antes de enviar imagen o link de WhatsApp.
-- Captura de leads (Year, Month, Day, Hour, nombre, teléfono, correo, fecha de nacimiento, programa, sucursal) guardada en `leads.xlsx`.
+- Captura de leads (Year, Month, Day, Hour, nombre, teléfono, Mail, fecha de nacimiento, programa, sucursal) guardada en `leads.xlsx`.
 - Handoff a WhatsApp cuando no entiende o el usuario pide un asesor.
 
 ## Personalizar
