@@ -310,6 +310,11 @@ def _deliver_wellness_info(state, topic):
             _text("Para Wellness agenda tu cita directamente por WhatsApp ✨"),
             _link(WELLNESS["whatsapp"], "Agendar cita Wellness"),
         ]
+    elif topic in {"appointment", "trial"}:
+        messages = [
+            _text("Para Wellness agenda tu cita directamente por WhatsApp ✨"),
+            _link(WELLNESS["whatsapp"], "Agendar cita Wellness"),
+        ]
     else:
         messages = [
             _text(
@@ -350,6 +355,25 @@ def _ask_branch(state, topic):
         "messages": [_text(prompts[topic])],
         "quick_replies": BRANCH_QUICK_REPLIES,
     }
+
+
+def _wants_wellness_appointment(message: str, state: dict) -> bool:
+    if not _is_wellness_context(message, state):
+        return False
+    text = _normalize(message)
+    return any(
+        phrase in text
+        for phrase in (
+            "agendar cita",
+            "agendar una cita",
+            "cita wellness",
+            "cita",
+            "agendar",
+            "programar cita",
+            "programar una cita",
+            "whatsapp wellness",
+        )
+    )
 
 
 def _ask_trial_name(state, branch_key):
@@ -726,6 +750,9 @@ def _route(message: str, state: dict) -> dict:
 
     if wellness_context and _normalize(message) == _normalize(WELLNESS["label"]):
         return _show_wellness_menu(state)
+
+    if _wants_wellness_appointment(message, state):
+        return _deliver_wellness_info(state, "appointment")
 
     if intent == "greeting":
         return welcome()
