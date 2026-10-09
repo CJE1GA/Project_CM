@@ -139,8 +139,16 @@ def detect_birth_date(message: str):
 
 
 def detect_name(message: str):
+    text = (message or "").strip()
+    if not text:
+        return None
+    if detect_email(text) or detect_birth_date(text):
+        return None
+    if "@" in text:
+        return None
+
     for pattern in NAME_PATTERNS:
-        match = pattern.search(message or "")
+        match = pattern.search(text)
         if not match:
             continue
         candidate = " ".join(match.group(1).strip().split())
@@ -149,9 +157,6 @@ def detect_name(message: str):
             continue
         return " ".join(word.capitalize() for word in words)
 
-    text = (message or "").strip()
-    if not text:
-        return None
     normalized = _normalize(text)
     if any(token in normalized for token in [
         "mi numero",
