@@ -35,12 +35,9 @@ SCHEDULE_TEXT = (
 PROGRAMS = ["HYROX", "Full Training", "Wellness", "Running"]
 
 WELCOME_MESSAGE = (
-    "¡Hola! 👋 Bienvenido a FULL.\n\n"
-    "Aquí entrenamos, sudamos y cumplimos objetivos... aunque prometemos que "
-    "las burpees no son obligatorias en esta conversación 😄.\n\n"
-    "Estoy aquí para ayudarte con información sobre nuestras clases, horarios, "
-    "costos, sucursales y clases muestra.\n\n"
-    "¿En qué puedo ayudarte hoy?"
+    "¡Hola! 😊 Bienvenido/a a FULL. Qué gusto saludarte. "
+    "Estoy aquí para ayudarte a encontrar la sucursal o información que necesitas.\n\n"
+    "¿Te interesa Guadalupe, Bosque Santa Anita, Wellness o saber qué es HYROX?"
 )
 
 LEADS_FILE = "leads.xlsx"

@@ -8,12 +8,10 @@ from leads import UNSPECIFIED, normalize_identifier, upsert_lead
 
 BRANCH_QUICK_REPLIES = [BRANCHES["guadalupe"]["name"], BRANCHES["bosque"]["name"]]
 MAIN_QUICK_REPLIES = [
+    "Guadalupe",
+    "Bosque Santa Anita",
     WELLNESS["label"],
-    "Sucursales",
-    "Horarios",
-    "Precios",
     "¿Qué es HYROX?",
-    "Clase muestra",
 ]
 WELLNESS_HELP_QUICK_REPLIES = ["Precios", "Sucursales", "Horarios"]
 
@@ -492,6 +490,20 @@ def _deliver_branch_info(state, topic, branch_key):
     return {"messages": messages, "quick_replies": MAIN_QUICK_REPLIES}
 
 
+def _deliver_branch_package(state, branch_key):
+    branch = BRANCHES[branch_key]
+    state["pending"] = None
+    state["branch"] = branch_key
+    return {
+        "messages": [
+            _text(f"¡Claro! Esta es la información de {branch['name']} 💪"),
+            _image(branch["pricing_image"], f"Precios {branch['name']}"),
+            _text(f"Horarios de {branch['name']} 🗓️\n\n{SCHEDULE_TEXT}"),
+        ],
+        "quick_replies": MAIN_QUICK_REPLIES,
+    }
+
+
 def _lead_name(state: dict) -> str:
     lead = state.get("lead", {})
     real_name = (lead.get("name") or "").strip()
@@ -690,6 +702,8 @@ def _route(message: str, state: dict) -> dict:
         topic = pending.split(":", 1)[1]
         branch_key = detect_branch(message)
         if branch_key:
+            if topic == "location":
+                return _deliver_branch_package(state, branch_key)
             return _deliver_branch_info(state, topic, branch_key)
         intent = detect_intent(message)
         if intent in {"location", "schedules", "hyrox", "pricing", "trial", "lead", "human"}:
@@ -815,5 +829,11 @@ def _route(message: str, state: dict) -> dict:
 
     if _is_data_update_only(message):
         return _acknowledge_lead_update()
+
+    if branch_key and intent in {"fallback", "location", "pricing"}:
+        state["pending"] = None
+        if intent == "pricing":
+            return _deliver_branch_info(state, "pricing", branch_key)
+        return _deliver_branch_package(state, branch_key)
 
     return _human_handoff(state)

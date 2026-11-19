@@ -17,6 +17,8 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 _state_lock = threading.Lock()
 _user_states = {}
+_processed_event_ids = set()
+_processed_event_ids_lock = threading.Lock()
 
 
 def _meta_config() -> dict:
@@ -168,6 +170,14 @@ def _process_meta_event(event: dict) -> bool:
         bot.set_instagram_username(state, f"@ig_{sender_id}")
 
     reply = bot.handle_message(text, state)
+
+    with _processed_event_ids_lock:
+        event_id = event.get("id")
+        if event_id in _processed_event_ids:
+            app.logger.info("Duplicate event ID %s, skipping processing.", event_id)
+            return True
+        _processed_event_ids.add(event_id)
+
     _send_instagram_reply(sender_id, reply)
     return True
 
@@ -256,6 +266,14 @@ def receive_webhook():
     payload = request.get_json(silent=True) or {}
     processed = 0
     for event in _iter_meta_events(payload):
+        event_id = str((event.get("message") or {}).get("mid") or event.get("postback", {}).get("payload") or "").strip()
+        if event_id:
+            with _processed_event_ids_lock:
+                if event_id in _processed_event_ids:
+                    continue
+                _processed_event_ids.add(event_id)
+                if len(_processed_event_ids) > 5000:
+                    _processed_event_ids.clear()
         processed += int(_process_meta_event(event))
     return jsonify({"status": "ok", "processed": processed})
 
