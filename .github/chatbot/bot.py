@@ -50,9 +50,12 @@ INTENT_KEYWORDS = {
         "trial", "free trial", "try a class", "muestra",
     ],
     "lead": [
-        "inscribirme", "inscripcion", "inscripción", "quiero unirme",
-        "quiero entrenar", "registrarme", "me interesa", "quiero informacion para inscribirme",
-        "sign up", "join", "enroll",
+        "quiero",
+        "inscribirme",
+        "inscripcion",
+        "inscripción",
+        "registrarme",
+        "unirme",
     ],
     "human": [
         "asesor", "humano", "persona", "hablar con alguien", "ayuda humana",
@@ -177,6 +180,12 @@ def detect_name(message: str):
         "guadalupe",
         "bosque",
         "anita",
+        "quiero",
+        "inscribirme",
+        "inscripcion",
+        "inscripción",
+        "registrarme",
+        "unirme",
     ]):
         return None
 
@@ -611,33 +620,11 @@ def _is_data_update_only(message: str) -> bool:
 
 
 def _start_lead(state, message: str):
-    state["pending"] = None
     lead = state.get("lead", {})
-    branch_name = lead.get("branch", UNSPECIFIED)
-    program_name = lead.get("program", UNSPECIFIED)
 
-    if branch_name != UNSPECIFIED:
-        branch_key = next((key for key, branch in BRANCHES.items() if branch["name"] == branch_name), None)
-        if branch_key:
-            branch = BRANCHES[branch_key]
-            return {
-                "messages": [
-                    _text(
-                        f"Perfecto, ya tengo registrado tu interés en {program_name} para {branch_name}."
-                    ),
-                    _link(branch["whatsapp"], f"WhatsApp {branch['name']}"),
-                ],
-                "quick_replies": MAIN_QUICK_REPLIES,
-            }
-
-    return {
-        "messages": [
-            _text(
-                "Perfecto, ya tengo registrado tu interés. También puedo compartirte horarios, precios o clase muestra."
-            )
-        ],
-        "quick_replies": MAIN_QUICK_REPLIES,
-    }
+    if (lead.get("name") or "").strip():
+        return _advance_lead_registration(state)
+    return _ask_lead_name(state)
 
 
 def _acknowledge_lead_update() -> dict:
@@ -761,6 +748,26 @@ def _route(message: str, state: dict) -> dict:
             "quick_replies": [],
         }
 
+    if pending == "name:lead":
+        if (state.get("lead", {}).get("name") or "").strip():
+            return _advance_lead_registration(state)
+        return _ask_lead_name(state)
+
+    if pending == "email:lead":
+        if (state.get("lead", {}).get("email") or "").strip():
+            return _advance_lead_registration(state)
+        return _ask_lead_email(state)
+
+    if pending == "phone:lead":
+        if (state.get("lead", {}).get("phone") or "").strip():
+            return _advance_lead_registration(state)
+        return _ask_lead_phone(state)
+
+    if pending == "dob:lead":
+        if (state.get("lead", {}).get("birth_date") or "").strip():
+            return _advance_lead_registration(state)
+        return _ask_lead_birth_date(state)
+
     branch_key = detect_branch(message)
     if branch_key:
         state["branch"] = branch_key
@@ -837,3 +844,77 @@ def _route(message: str, state: dict) -> dict:
         return _deliver_branch_package(state, branch_key)
 
     return _human_handoff(state)
+
+
+def _ask_lead_name(state):
+    state["pending"] = "name:lead"
+    return {
+        "messages": [
+            _text("Antes de registrarte, ¿me puedes compartir tu nombre completo? 📝")
+        ],
+        "quick_replies": [],
+    }
+
+
+def _ask_lead_email(state):
+    state["pending"] = "email:lead"
+    return {
+        "messages": [_text("Gracias. Ahora compárteme tu correo electrónico, por favor ✉️")],
+        "quick_replies": [],
+    }
+
+
+def _ask_lead_phone(state):
+    state["pending"] = "phone:lead"
+    return {
+        "messages": [_text("Perfecto. ¿Cuál es tu número de teléfono? 📱")],
+        "quick_replies": [],
+    }
+
+
+def _ask_lead_birth_date(state):
+    state["pending"] = "dob:lead"
+    return {
+        "messages": [_text("Por último, ¿cuál es tu fecha de nacimiento? 📅")],
+        "quick_replies": [],
+    }
+
+
+def _deliver_lead_registration(state):
+    lead = state.get("lead", {})
+    state["pending"] = None
+    branch_name = lead.get("branch", UNSPECIFIED)
+    branch_key = next(
+        (key for key, branch in BRANCHES.items() if branch["name"] == branch_name),
+        state.get("branch"),
+    )
+
+    if branch_key:
+        branch = BRANCHES[branch_key]
+        return {
+            "messages": [
+                _text("¡Listo! Tu registro quedó completado. Nuestro equipo podrá ayudarte por WhatsApp 🙌"),
+                _link(branch["whatsapp"], f"WhatsApp {branch['name']}"),
+            ],
+            "quick_replies": MAIN_QUICK_REPLIES,
+        }
+
+    return {
+        "messages": [
+            _text("¡Listo! Tu registro quedó completado. ¿Quieres que te comparta precios, horarios o sucursales?")
+        ],
+        "quick_replies": MAIN_QUICK_REPLIES,
+    }
+
+
+def _advance_lead_registration(state):
+    lead = state.get("lead", {})
+    if not (lead.get("name") or "").strip():
+        return _ask_lead_name(state)
+    if not (lead.get("email") or "").strip():
+        return _ask_lead_email(state)
+    if not (lead.get("phone") or "").strip():
+        return _ask_lead_phone(state)
+    if not (lead.get("birth_date") or "").strip():
+        return _ask_lead_birth_date(state)
+    return _deliver_lead_registration(state)

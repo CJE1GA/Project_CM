@@ -16,6 +16,7 @@ SCRIPTS = [
     ["horarios", "guadalupe", "precios", "clase muestra", "Maria Lopez", "maria@example.com", "8119998877", "03/11/1997", "quiero inscribirme en running"],
     ["horarios", "guadalupe", "quiero otra sucursal", "bosque", "precios"],
     ["tienen alberca olimpica?"],
+    ["quiero inscribirme", "Juan Pérez García", "juan@example.com", "8112345678", "12/05/1998", "Guadalupe"],
 ]
 
 
