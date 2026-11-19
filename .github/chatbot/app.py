@@ -8,7 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import Flask, Response, jsonify, render_template, request, session
+from flask import Flask, Response, jsonify, render_template, request, session, has_request_context
 
 import bot
 
@@ -45,9 +45,17 @@ def _graph_request(path: str, *, method: str = "GET", query: dict | None = None,
         headers["Content-Type"] = "application/json"
 
     request_obj = urllib.request.Request(_graph_url(path, query), data=data, headers=headers, method=method)
-    with urllib.request.urlopen(request_obj, timeout=15) as response:
-        payload = response.read().decode("utf-8")
-    return json.loads(payload) if payload else {}
+    try:
+        with urllib.request.urlopen(request_obj, timeout=15) as response:
+            payload = response.read().decode("utf-8")
+        return json.loads(payload) if payload else {}
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        app.logger.error("Meta Graph API returned HTTP %s: %s", error.code, error_body)
+        return {"error": {"message": error_body, "http_status": error.code}}
+    except urllib.error.URLError as error:
+        app.logger.error("Meta Graph API connection error: %s", error.reason)
+        return {"error": {"message": str(error.reason)}}
 
 
 def _get_user_state(user_key: str) -> dict:
@@ -111,12 +119,13 @@ def _send_instagram_reply(recipient_id: str, reply: dict) -> None:
         if message["type"] == "text":
             _send_instagram_message(recipient_id, {"text": message["content"]})
         elif message["type"] == "image":
+            public_url = _absolute_public_url(message["url"])
             _send_instagram_message(
                 recipient_id,
                 {
                     "attachment": {
                         "type": "image",
-                        "payload": {"url": message["url"], "is_reusable": False},
+                        "payload": {"url": public_url, "is_reusable": False},
                     }
                 },
             )
@@ -167,6 +176,32 @@ def _iter_meta_events(payload: dict):
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []):
             yield event
+
+
+def _public_base_url() -> str:
+    base_url = (
+        os.environ.get("META_PUBLIC_BASE_URL", "").strip()
+        or os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+    )
+    if not base_url and has_request_context():
+        base_url = request.host_url
+
+    base_url = base_url.rstrip("/")
+    if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        base_url = "https://" + base_url[len("http://") :]
+    return base_url
+
+
+def _absolute_public_url(url: str) -> str:
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return url
+
+    base_url = _public_base_url()
+    if not base_url:
+        return url
+    return urllib.parse.urljoin(base_url + "/", url.lstrip("/"))
 
 
 @app.route("/")
