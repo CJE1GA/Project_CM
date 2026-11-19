@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +20,9 @@ _state_lock = threading.Lock()
 _user_states = {}
 _processed_event_ids = set()
 _processed_event_ids_lock = threading.Lock()
+
+_PROCESS_STARTED_AT = time.time()
+_webhook_workers = []
 
 
 def _meta_config() -> dict:
@@ -163,20 +167,10 @@ def _process_meta_event(event: dict) -> bool:
     state = _get_user_state(sender_id)
     bot.set_lead_identifier(state, f"ig:{sender_id}")
 
-    username = _fetch_instagram_username(sender_id)
-    if username:
-        bot.set_instagram_username(state, username)
-    elif not state.get("instagram_username"):
+    if not state.get("instagram_username"):
         bot.set_instagram_username(state, f"@ig_{sender_id}")
 
     reply = bot.handle_message(text, state)
-
-    with _processed_event_ids_lock:
-        event_id = event.get("id")
-        if event_id in _processed_event_ids:
-            app.logger.info("Duplicate event ID %s, skipping processing.", event_id)
-            return True
-        _processed_event_ids.add(event_id)
 
     _send_instagram_reply(sender_id, reply)
     return True
@@ -264,18 +258,46 @@ def verify_webhook():
 @app.post("/webhook")
 def receive_webhook():
     payload = request.get_json(silent=True) or {}
-    processed = 0
-    for event in _iter_meta_events(payload):
-        event_id = str((event.get("message") or {}).get("mid") or event.get("postback", {}).get("payload") or "").strip()
-        if event_id:
+    queued = 0
+
+    for entry in payload.get("entry", []):
+        entry_timestamp = entry.get("time")
+        if isinstance(entry_timestamp, (int, float)):
+            entry_timestamp_seconds = entry_timestamp / 1000 if entry_timestamp > 10_000_000_000 else entry_timestamp
+            if entry_timestamp_seconds < _PROCESS_STARTED_AT:
+                app.logger.info("Ignoring webhook replay received before process restart.")
+                continue
+
+        for event in entry.get("messaging", []):
+            event_timestamp = event.get("timestamp")
+            if isinstance(event_timestamp, (int, float)):
+                event_timestamp_seconds = event_timestamp / 1000 if event_timestamp > 10_000_000_000 else event_timestamp
+                if event_timestamp_seconds < _PROCESS_STARTED_AT:
+                    app.logger.info("Ignoring old Instagram event before process restart.")
+                    continue
+
+            event_id = str((event.get("message") or {}).get("mid") or "").strip()
+            if not event_id:
+                sender_id = str((event.get("sender") or {}).get("id") or "")
+                event_timestamp = event.get("timestamp") or ""
+                postback_payload = str((event.get("postback") or {}).get("payload") or "")
+                event_id = "|".join((sender_id, str(event_timestamp), postback_payload)).strip("|")
+
             with _processed_event_ids_lock:
                 if event_id in _processed_event_ids:
                     continue
                 _processed_event_ids.add(event_id)
                 if len(_processed_event_ids) > 5000:
                     _processed_event_ids.clear()
-        processed += int(_process_meta_event(event))
-    return jsonify({"status": "ok", "processed": processed})
+
+            worker = threading.Thread(target=_process_meta_event, args=(event,), daemon=True)
+            worker.start()
+            _webhook_workers.append(worker)
+            if len(_webhook_workers) > 100:
+                _webhook_workers[:] = [item for item in _webhook_workers if item.is_alive()]
+            queued += 1
+
+    return jsonify({"status": "ok", "queued": queued})
 
 
 @app.get("/healthz")
