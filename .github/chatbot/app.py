@@ -28,6 +28,8 @@ _meta_rate_lock = threading.Lock()
 
 _PROCESS_STARTED_AT = time.time()
 _webhook_workers = []
+_outbound_retry_queue = {}
+_outbound_retry_lock = threading.Lock()
 
 
 def _meta_config() -> dict:
@@ -167,6 +169,20 @@ def _send_instagram_reply(recipient_id: str, reply: dict) -> None:
             result = _send_instagram_message(recipient_id, {"text": f"{message['label']}: {message['url']}"})
 
         if isinstance(result, dict) and (result.get("error") or result.get("skipped")):
+            outbound_message = None
+            if message["type"] == "text":
+                outbound_message = {"text": message["content"]}
+            elif message["type"] == "image":
+                outbound_message = {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {"url": public_url, "is_reusable": False},
+                    }
+                }
+            elif message["type"] == "link":
+                outbound_message = {"text": f"{message['label']}: {message['url']}"}
+            if outbound_message:
+                _queue_outbound_retry(recipient_id, outbound_message)
             app.logger.warning("Stopping remaining Instagram reply messages: %s", result)
             break
 
@@ -337,14 +353,63 @@ def healthcheck():
     config = _meta_config()
     with _meta_rate_lock:
         rate_limit_remaining = max(0, int(_meta_rate_limited_until - time.time()))
+    with _outbound_retry_lock:
+        retry_queue_size = len(_outbound_retry_queue)
     return jsonify(
         {
             "status": "ok",
             "meta_configured": bool(config["verify_token"] and config["access_token"] and config["instagram_account_id"]),
             "meta_rate_limit_seconds_remaining": rate_limit_remaining,
+            "outbound_retry_queue_size": retry_queue_size,
         }
     )
 
+
+def _queue_outbound_retry(recipient_id: str, message: dict) -> None:
+    key = recipient_id + "|" + json.dumps(message, sort_keys=True, ensure_ascii=False)
+    with _outbound_retry_lock:
+        existing = _outbound_retry_queue.get(key)
+        if existing:
+            existing["not_before"] = max(existing["not_before"], time.time() + 900)
+            return
+        _outbound_retry_queue[key] = {
+            "recipient_id": recipient_id,
+            "message": message,
+            "attempts": 0,
+            "not_before": time.time() + 900,
+        }
+
+
+def _retry_outbound_worker() -> None:
+    while True:
+        time.sleep(60)
+        now = time.time()
+        with _meta_rate_lock:
+            if _meta_rate_limited_until > now:
+                continue
+
+        with _outbound_retry_lock:
+            items = list(_outbound_retry_queue.items())
+
+        for key, item in items:
+            if item["not_before"] > now:
+                continue
+            if item["attempts"] >= 12:
+                with _outbound_retry_lock:
+                    _outbound_retry_queue.pop(key, None)
+                continue
+
+            item["attempts"] += 1
+            result = _send_instagram_message(item["recipient_id"], item["message"])
+            if isinstance(result, dict) and not result.get("error") and not result.get("skipped"):
+                with _outbound_retry_lock:
+                    _outbound_retry_queue.pop(key, None)
+            else:
+                item["not_before"] = time.time() + 900
+
+
+_retry_thread = threading.Thread(target=_retry_outbound_worker, daemon=True, name="meta-outbound-retry")
+_retry_thread.start()
 
 if __name__ == "__main__":
     use_https = os.environ.get("FLASK_USE_HTTPS", "0").strip().lower() in {"1", "true", "yes", "on"}
