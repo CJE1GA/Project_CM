@@ -68,7 +68,7 @@ def _graph_request(path: str, *, method: str = "GET", query: dict | None = None,
         if error.code == 429 or is_application_limit:
             global _meta_rate_limited_until
             with _meta_rate_lock:
-                pause_seconds = 300 if is_application_limit else 60
+                pause_seconds = 3600 if is_application_limit else 300
                 _meta_rate_limited_until = max(_meta_rate_limited_until, time.time() + pause_seconds)
             app.logger.warning("Meta paused outbound sends for %s seconds.", pause_seconds)
 
@@ -129,7 +129,7 @@ def _send_instagram_message(recipient_id: str, message: dict) -> dict:
         return {"skipped": True, "reason": "Meta application request limit active."}
 
     with _outbound_lock:
-        wait_seconds = max(0.0, 0.35 - (time.time() - _last_outbound_send))
+        wait_seconds = max(0.0, 1.0 - (time.time() - _last_outbound_send))
         if wait_seconds:
             time.sleep(wait_seconds)
         _last_outbound_send = time.time()
@@ -149,11 +149,12 @@ def _send_instagram_message(recipient_id: str, message: dict) -> dict:
 
 def _send_instagram_reply(recipient_id: str, reply: dict) -> None:
     for message in reply.get("messages", []):
+        result = None
         if message["type"] == "text":
-            _send_instagram_message(recipient_id, {"text": message["content"]})
+            result = _send_instagram_message(recipient_id, {"text": message["content"]})
         elif message["type"] == "image":
             public_url = _absolute_public_url(message["url"])
-            _send_instagram_message(
+            result = _send_instagram_message(
                 recipient_id,
                 {
                     "attachment": {
@@ -163,7 +164,11 @@ def _send_instagram_reply(recipient_id: str, reply: dict) -> None:
                 },
             )
         elif message["type"] == "link":
-            _send_instagram_message(recipient_id, {"text": f"{message['label']}: {message['url']}"})
+            result = _send_instagram_message(recipient_id, {"text": f"{message['label']}: {message['url']}"})
+
+        if isinstance(result, dict) and (result.get("error") or result.get("skipped")):
+            app.logger.warning("Stopping remaining Instagram reply messages: %s", result)
+            break
 
 
 def _extract_incoming_text(event: dict) -> tuple[str, str, list | None]:
