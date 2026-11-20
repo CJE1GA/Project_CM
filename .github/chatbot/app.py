@@ -21,6 +21,11 @@ _user_states = {}
 _processed_event_ids = set()
 _processed_event_ids_lock = threading.Lock()
 
+_outbound_lock = threading.Lock()
+_last_outbound_send = 0.0
+_meta_rate_limited_until = 0.0
+_meta_rate_lock = threading.Lock()
+
 _PROCESS_STARTED_AT = time.time()
 _webhook_workers = []
 
@@ -58,6 +63,15 @@ def _graph_request(path: str, *, method: str = "GET", query: dict | None = None,
     except urllib.error.HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")
         app.logger.error("Meta Graph API returned HTTP %s: %s", error.code, error_body)
+
+        is_application_limit = '"code":4' in error_body or '"code": 4' in error_body
+        if error.code == 429 or is_application_limit:
+            global _meta_rate_limited_until
+            with _meta_rate_lock:
+                pause_seconds = 300 if is_application_limit else 60
+                _meta_rate_limited_until = max(_meta_rate_limited_until, time.time() + pause_seconds)
+            app.logger.warning("Meta paused outbound sends for %s seconds.", pause_seconds)
+
         return {"error": {"message": error_body, "http_status": error.code}}
     except urllib.error.URLError as error:
         app.logger.error("Meta Graph API connection error: %s", error.reason)
@@ -106,6 +120,19 @@ def _send_instagram_message(recipient_id: str, message: dict) -> dict:
     config = _meta_config()
     if not config["access_token"] or not config["instagram_account_id"]:
         return {"skipped": True, "reason": "Missing Meta API credentials."}
+
+    global _last_outbound_send
+    with _meta_rate_lock:
+        rate_limited_until = _meta_rate_limited_until
+    if rate_limited_until > time.time():
+        app.logger.warning("Skipping Instagram send while Meta rate limit is active.")
+        return {"skipped": True, "reason": "Meta application request limit active."}
+
+    with _outbound_lock:
+        wait_seconds = max(0.0, 0.35 - (time.time() - _last_outbound_send))
+        if wait_seconds:
+            time.sleep(wait_seconds)
+        _last_outbound_send = time.time()
 
     body = {
         "recipient": {"id": recipient_id},
@@ -303,10 +330,13 @@ def receive_webhook():
 @app.get("/healthz")
 def healthcheck():
     config = _meta_config()
+    with _meta_rate_lock:
+        rate_limit_remaining = max(0, int(_meta_rate_limited_until - time.time()))
     return jsonify(
         {
             "status": "ok",
             "meta_configured": bool(config["verify_token"] and config["access_token"] and config["instagram_account_id"]),
+            "meta_rate_limit_seconds_remaining": rate_limit_remaining,
         }
     )
 
